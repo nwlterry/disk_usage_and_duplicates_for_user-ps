@@ -37,7 +37,9 @@
 
 [CmdletBinding()]
 param(
-    [string[]]$Path = @(),
+    # Accept any form: single string, array, or comma-separated. Normalized inside.
+    [Parameter()]
+    [object]$Path = $null,
     [string]$OutDir = ".\DiskUsageReport",
     [int]$MinHashMB = 5,
     [int]$MaxFilesToHash = 50000
@@ -71,7 +73,20 @@ function Get-AgeBucket {
 
 # ---------- Resolve scan roots ----------
 $roots = @()
-if (-not $Path -or $Path.Count -eq 0 -or ($Path.Count -eq 1 -and [string]::IsNullOrWhiteSpace($Path[0]))) {
+
+# Normalize Path argument into a clean string array (handles string, array, or null)
+$normalized = @()
+if ($null -ne $Path) {
+    if ($Path -is [string]) {
+        $normalized = @($Path)
+    } elseif ($Path -is [System.Collections.IEnumerable]) {
+        $normalized = @($Path | ForEach-Object { "$_" })
+    } else {
+        $normalized = @("$Path")
+    }
+}
+
+if ($normalized.Count -eq 0 -or ($normalized.Count -eq 1 -and [string]::IsNullOrWhiteSpace($normalized[0]))) {
     Write-Status "No path specified. Scanning common user folders..." "Yellow"
     $userProfile = $env:USERPROFILE
     $candidates = @(
@@ -90,9 +105,8 @@ if (-not $Path -or $Path.Count -eq 0 -or ($Path.Count -eq 1 -and [string]::IsNul
         exit 1
     }
 } else {
-    # Support both array and comma/semicolon-separated strings
     $raw = @()
-    foreach ($p in $Path) {
+    foreach ($p in $normalized) {
         if ([string]::IsNullOrWhiteSpace($p)) { continue }
         $raw += $p -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
     }
