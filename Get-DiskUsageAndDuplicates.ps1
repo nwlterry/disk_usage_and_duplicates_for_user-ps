@@ -74,7 +74,8 @@ function Get-AgeBucket {
 # ---------- Resolve scan roots ----------
 $roots = @()
 
-# Normalize Path argument into a clean string array (handles string, array, or null)
+# Normalize Path argument into a clean string array
+# Handles: null, single string, array, or a string that looks like "a","b" or a,b
 $normalized = @()
 if ($null -ne $Path) {
     if ($Path -is [string]) {
@@ -85,6 +86,20 @@ if ($null -ne $Path) {
         $normalized = @("$Path")
     }
 }
+
+# Flatten further: if any element itself contains comma/semicolon or looks like quoted list, split it
+$final = @()
+foreach ($item in $normalized) {
+    if ([string]::IsNullOrWhiteSpace($item)) { continue }
+    # Remove surrounding quotes if the whole item is quoted
+    $clean = $item.Trim()
+    if ($clean.StartsWith('"') -and $clean.EndsWith('"')) { $clean = $clean.Trim('"') }
+    if ($clean.StartsWith("'") -and $clean.EndsWith("'")) { $clean = $clean.Trim("'") }
+    # Split on comma or semicolon
+    $parts = $clean -split '[,;]' | ForEach-Object { $_.Trim().Trim('"').Trim("'") } | Where-Object { $_ }
+    $final += $parts
+}
+$normalized = $final
 
 if ($normalized.Count -eq 0 -or ($normalized.Count -eq 1 -and [string]::IsNullOrWhiteSpace($normalized[0]))) {
     Write-Status "No path specified. Scanning common user folders..." "Yellow"
