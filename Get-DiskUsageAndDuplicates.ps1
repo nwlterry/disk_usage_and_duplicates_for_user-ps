@@ -246,7 +246,7 @@ $topFolders = $folderSizes.GetEnumerator() |
     Select-Object -First 50 |
     ForEach-Object {
         [PSCustomObject]@{
-            Path = $_.Key
+            Path = (Normalize-Path $_.Key)
             Size = $_.Value
             SizeFormatted = Format-Bytes $_.Value
         }
@@ -363,9 +363,14 @@ function Ensure-Array($v) {
     return @($v)
 }
 
+function Normalize-Path([string]$p) {
+    if ([string]::IsNullOrEmpty($p)) { return $p }
+    return $p.Replace('\','/')
+}
+
 $report = [ordered]@{
     generated     = (Get-Date).ToString("o")
-    roots         = Ensure-Array $roots
+    roots         = Ensure-Array ($roots | ForEach-Object { Normalize-Path $_ })
     totalSize     = $totalSize
     totalSizeFormatted = Format-Bytes $totalSize
     fileCount     = $allFiles.Count
@@ -373,7 +378,7 @@ $report = [ordered]@{
     totalWaste    = $totalWaste
     totalWasteFormatted = Format-Bytes $totalWaste
     largestFiles  = Ensure-Array ($largestFiles | Select-Object -First 50 | ForEach-Object {
-        [ordered]@{ path=$_.Path; name=$_.Name; size=$_.Size; sizeFormatted=Format-Bytes $_.Size; ext=$_.Extension; lastWrite=$_.LastWrite.ToString("yyyy-MM-dd HH:mm") }
+        [ordered]@{ path=(Normalize-Path $_.Path); name=$_.Name; size=$_.Size; sizeFormatted=Format-Bytes $_.Size; ext=$_.Extension; lastWrite=$_.LastWrite.ToString("yyyy-MM-dd HH:mm") }
     })
     topFolders    = Ensure-Array ($topFolders | Select-Object -First 30)
     extensions    = Ensure-Array $extensionTable
@@ -386,7 +391,7 @@ $report = [ordered]@{
             count = $_.Count
             waste = $_.Waste
             wasteFormatted = $_.WasteFormatted
-            paths = Ensure-Array $_.Paths
+            paths = Ensure-Array ($_.Paths | ForEach-Object { Normalize-Path $_ })
         }
     })
     errors        = Ensure-Array ($errors | Select-Object -First 50)
@@ -474,12 +479,11 @@ document.getElementById('roots').textContent = (data.roots || []).join(', ');
 function fmt(n){ return n.toLocaleString(); }
 function pct(part, total){ return total ? Math.round(part/total*100) : 0; }
 
-document.getElementById('stats').innerHTML = ``
-  <div class="stat"><div class="label">Total Size</div><div class="value">${data.totalSizeFormatted}</div></div>
-  <div class="stat"><div class="label">Files</div><div class="value">${fmt(data.fileCount)}</div></div>
-  <div class="stat"><div class="label">Duplicate Groups</div><div class="value">${fmt(data.duplicateGroups)}</div></div>
-  <div class="stat"><div class="label">Potential Savings</div><div class="value good">${data.totalWasteFormatted}</div></div>
-``;
+document.getElementById('stats').innerHTML =
+  '<div class="stat"><div class="label">Total Size</div><div class="value">' + (data.totalSizeFormatted||'') + '</div></div>' +
+  '<div class="stat"><div class="label">Files</div><div class="value">' + fmt(data.fileCount||0) + '</div></div>' +
+  '<div class="stat"><div class="label">Duplicate Groups</div><div class="value">' + fmt(data.duplicateGroups||0) + '</div></div>' +
+  '<div class="stat"><div class="label">Potential Savings</div><div class="value good">' + (data.totalWasteFormatted||'') + '</div></div>';
 
 // Overview
 document.getElementById('overview').innerHTML = ``
@@ -490,7 +494,9 @@ document.getElementById('overview').innerHTML = ``
 // Folders
 let fhtml = '<table><thead><tr><th>Folder</th><th>Size</th></tr></thead><tbody>';
 (data.topFolders || []).forEach(f => {
-  fhtml += ``<tr><td class="path">${f.Path}</td><td>${f.SizeFormatted}</td></tr>``;
+  var p = f.Path || f.path || '';
+  var s = f.SizeFormatted || f.sizeFormatted || '';
+  fhtml += '<tr><td class="path">' + p + '</td><td>' + s + '</td></tr>';
 });
 fhtml += '</tbody></table>';
 document.getElementById('folders').innerHTML = fhtml;
@@ -498,7 +504,10 @@ document.getElementById('folders').innerHTML = fhtml;
 // Files
 let flhtml = '<table><thead><tr><th>File</th><th>Size</th><th>Modified</th></tr></thead><tbody>';
 (data.largestFiles || []).forEach(f => {
-  flhtml += ``<tr><td class="path">${f.path}</td><td>${f.sizeFormatted}</td><td>${f.lastWrite}</td></tr>``;
+  var p = f.path || f.Path || '';
+  var s = f.sizeFormatted || f.SizeFormatted || '';
+  var d = f.lastWrite || f.LastWrite || '';
+  flhtml += '<tr><td class="path">' + p + '</td><td>' + s + '</td><td>' + d + '</td></tr>';
 });
 flhtml += '</tbody></table>';
 document.getElementById('files').innerHTML = flhtml;
