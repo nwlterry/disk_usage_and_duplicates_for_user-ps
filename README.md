@@ -43,7 +43,7 @@ Inspired by [nwlterry/disk_space_analysis-windows-ps](https://github.com/nwlterr
 
 | Parameter       | Default                  | Description                                      |
 |-----------------|--------------------------|--------------------------------------------------|
-| `-Path`         | User profile folders     | Folder(s) or drive(s) to scan (comma or semicolon separated) |
+| `-Path`         | User profile folders     | Folder(s) or drive(s) to scan. Accepts multiple paths (`-Path "D:\","E:\Data"`) or a comma/semicolon-separated string |
 | `-OutDir`       | `.\DiskUsageReport`      | Output folder for HTML / CSV / JSON              |
 | `-MinHashMB`    | `5`                      | Minimum file size (MB) to consider for hashing   |
 | `-MaxFilesToHash` | `50000`                | Safety limit on number of files to hash          |
