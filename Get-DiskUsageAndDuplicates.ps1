@@ -397,7 +397,9 @@ $report | ConvertTo-Json -Depth 6 | Set-Content -Path $jsonPath -Encoding UTF8
 
 # ---------- Generate HTML report ----------
 $htmlPath = "$OutDir\disk-usage-report-$stamp.html"
-$jsonSafe = ($report | ConvertTo-Json -Depth 6 -Compress).Replace('<','\u003c').Replace('>','\u003e').Replace('&','\u0026')
+$jsonRaw = $report | ConvertTo-Json -Depth 6 -Compress
+# Escape for safe embedding inside a JS single-quoted string
+$jsonSafe = $jsonRaw.Replace('\','\\').Replace("'","\'").Replace("`r",'').Replace("`n",'\n').Replace('</','<\/')
 
 $html = @"
 <!DOCTYPE html>
@@ -455,9 +457,8 @@ $html = @"
 <div id="ages" class="pane"></div>
 <div id="dupes" class="pane"></div>
 <footer>Read-only report. No files were modified. Inspired by nwlterry/disk_space_analysis-windows-ps</footer>
-<script id="data" type="application/json">$jsonSafe</script>
 <script>
-const data = JSON.parse(document.getElementById('data').textContent);
+const data = JSON.parse('$jsonSafe');
 // Defensive defaults
 data.roots = data.roots || [];
 data.largestFiles = data.largestFiles || [];
