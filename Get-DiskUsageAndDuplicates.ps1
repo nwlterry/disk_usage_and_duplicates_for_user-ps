@@ -491,14 +491,56 @@ document.getElementById('overview').innerHTML = ``
   <p>Only files ≥ the configured threshold were hashed. Smaller files are still included in usage totals.</p>
 ``;
 
-// Folders
-let fhtml = '<table><thead><tr><th>Folder</th><th>Size</th></tr></thead><tbody>';
-(data.topFolders || []).forEach(f => {
-  var p = f.Path || f.path || '';
-  var s = f.SizeFormatted || f.sizeFormatted || '';
-  fhtml += '<tr><td class="path">' + p + '</td><td>' + s + '</td></tr>';
-});
-fhtml += '</tbody></table>';
+// Folders (tree based on scanned roots)
+function buildTree(folders, roots) {
+  var nodes = {};
+  (folders || []).forEach(function(f) {
+    var p = (f.Path || f.path || '').replace(/\\/g, '/');
+    if (!p) return;
+    var parts = p.split('/').filter(Boolean);
+    var cur = '';
+    parts.forEach(function(part, i) {
+      var next = cur + '/' + part;
+      if (!nodes[next]) {
+        nodes[next] = { name: part, path: next, children: {}, size: '', isLeaf: false };
+      }
+      if (i === parts.length - 1) {
+        nodes[next].size = f.SizeFormatted || f.sizeFormatted || '';
+        nodes[next].isLeaf = true;
+      }
+      if (cur && nodes[cur]) nodes[cur].children[next] = nodes[next];
+      cur = next;
+    });
+  });
+  var rootNodes = [];
+  var seen = {};
+  (roots || []).forEach(function(r) {
+    var rn = r.replace(/\\/g, '/');
+    if (nodes[rn]) { rootNodes.push(nodes[rn]); seen[rn] = true; }
+  });
+  if (rootNodes.length === 0) {
+    Object.keys(nodes).forEach(function(k) {
+      var depth = k.split('/').filter(Boolean).length;
+      if (depth === 1 || depth === 2) rootNodes.push(nodes[k]);
+    });
+  }
+  return rootNodes;
+}
+function renderTree(nodes, depth) {
+  var html = '';
+  (nodes || []).forEach(function(n) {
+    var indent = '&nbsp;'.repeat(depth * 4);
+    var kids = Object.values(n.children || {});
+    html += '<div style="padding:2px 0;font-family:Consolas,monospace;font-size:.85rem">' +
+            indent + (kids.length ? '📁 ' : '📄 ') + n.name +
+            (n.size ? ' <span style="color:#94a3b8">(' + n.size + ')</span>' : '') +
+            '</div>';
+    if (kids.length) html += renderTree(kids, depth + 1);
+  });
+  return html;
+}
+var treeRoots = buildTree(data.topFolders, data.roots);
+var fhtml = '<div style="padding:.5rem 0">' + (treeRoots.length ? renderTree(treeRoots, 0) : '<p>No folder data.</p>') + '</div>';
 document.getElementById('folders').innerHTML = fhtml;
 
 // Files
@@ -544,10 +586,9 @@ if (!data.duplicates || data.duplicates.length === 0) {
   dhtml = '<p>No duplicate groups found (or none above the size threshold).</p>';
 } else {
   (data.duplicates || []).forEach(g => {
-    dhtml += ``<div class="dup-group">
-      <h3>${g.count} copies · ${g.sizeFormatted} each · <span class="waste">waste ${g.wasteFormatted}</span></h3>
-      <div style="font-size:.75rem;color:#94a3b8;margin-bottom:.5rem">SHA-256: ${g.hash}</div>
-      <ul style="margin:0;padding-left:1.2rem">``;
+    dhtml += '<div class="dup-group">' +
+      '<h3>' + (g.count||0) + ' copies · ' + (g.sizeFormatted||'') + ' each · <span class="waste">waste ' + (g.wasteFormatted||'') + '</span></h3>' +
+      '<ul style="margin:0;padding-left:1.2rem">';
     (g.paths || []).forEach(p => { dhtml += '<li class="path">' + p + '</li>'; });
     dhtml += '</ul></div>';
   });
