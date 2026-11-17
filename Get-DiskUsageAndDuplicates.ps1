@@ -458,7 +458,7 @@ $html = @"
 <div id="dupes" class="pane"></div>
 <footer>Read-only report. No files were modified. Inspired by nwlterry/disk_space_analysis-windows-ps</footer>
 <script>
-const data = JSON.parse(atob('$b64'));
+const data = JSON.parse(atob('__B64_PLACEHOLDER__'));
 // Defensive defaults
 data.roots = data.roots || [];
 data.largestFiles = data.largestFiles || [];
@@ -474,23 +474,23 @@ document.getElementById('roots').textContent = (data.roots || []).join(', ');
 function fmt(n){ return n.toLocaleString(); }
 function pct(part, total){ return total ? Math.round(part/total*100) : 0; }
 
-document.getElementById('stats').innerHTML = `
+document.getElementById('stats').innerHTML = ``
   <div class="stat"><div class="label">Total Size</div><div class="value">${data.totalSizeFormatted}</div></div>
   <div class="stat"><div class="label">Files</div><div class="value">${fmt(data.fileCount)}</div></div>
   <div class="stat"><div class="label">Duplicate Groups</div><div class="value">${fmt(data.duplicateGroups)}</div></div>
   <div class="stat"><div class="label">Potential Savings</div><div class="value good">${data.totalWasteFormatted}</div></div>
-`;
+``;
 
 // Overview
-document.getElementById('overview').innerHTML = `
+document.getElementById('overview').innerHTML = ``
   <p>This report shows what is using space and where true duplicates (identical SHA-256 content) exist.</p>
   <p>Only files ≥ the configured threshold were hashed. Smaller files are still included in usage totals.</p>
-`;
+``;
 
 // Folders
 let fhtml = '<table><thead><tr><th>Folder</th><th>Size</th></tr></thead><tbody>';
 (data.topFolders || []).forEach(f => {
-  fhtml += `<tr><td class="path">${f.Path}</td><td>${f.SizeFormatted}</td></tr>`;
+  fhtml += ``<tr><td class="path">${f.Path}</td><td>${f.SizeFormatted}</td></tr>``;
 });
 fhtml += '</tbody></table>';
 document.getElementById('folders').innerHTML = fhtml;
@@ -498,7 +498,7 @@ document.getElementById('folders').innerHTML = fhtml;
 // Files
 let flhtml = '<table><thead><tr><th>File</th><th>Size</th><th>Modified</th></tr></thead><tbody>';
 (data.largestFiles || []).forEach(f => {
-  flhtml += `<tr><td class="path">${f.path}</td><td>${f.sizeFormatted}</td><td>${f.lastWrite}</td></tr>`;
+  flhtml += ``<tr><td class="path">${f.path}</td><td>${f.sizeFormatted}</td><td>${f.lastWrite}</td></tr>``;
 });
 flhtml += '</tbody></table>';
 document.getElementById('files').innerHTML = flhtml;
@@ -508,8 +508,8 @@ let thtml = '<table><thead><tr><th>Extension</th><th>Size</th><th>Count</th><th>
 const maxExt = Math.max(...(data.extensions || []).map(e => e.Size), 1);
 (data.extensions || []).forEach(e => {
   const p = pct(e.Size, maxExt);
-  thtml += `<tr><td>${e.Extension}</td><td>${e.SizeFormatted}</td><td>${fmt(e.Count)}</td>
-    <td><div class="bar"><div style="width:${p}%"></div></div></td></tr>`;
+  thtml += ``<tr><td>${e.Extension}</td><td>${e.SizeFormatted}</td><td>${fmt(e.Count)}</td>
+    <td><div class="bar"><div style="width:${p}%"></div></div></td></tr>``;
 });
 thtml += '</tbody></table>';
 document.getElementById('types').innerHTML = thtml;
@@ -519,8 +519,8 @@ let ahtml = '<table><thead><tr><th>Age</th><th>Size</th><th>Files</th><th></th><
 const maxAge = Math.max(...(data.ages || []).map(a => a.Size), 1);
 (data.ages || []).forEach(a => {
   const p = pct(a.Size, maxAge);
-  ahtml += `<tr><td>${a.AgeBucket}</td><td>${a.SizeFormatted}</td><td>${fmt(a.Count)}</td>
-    <td><div class="bar"><div style="width:${p}%"></div></div></td></tr>`;
+  ahtml += ``<tr><td>${a.AgeBucket}</td><td>${a.SizeFormatted}</td><td>${fmt(a.Count)}</td>
+    <td><div class="bar"><div style="width:${p}%"></div></div></td></tr>``;
 });
 ahtml += '</tbody></table>';
 document.getElementById('ages').innerHTML = ahtml;
@@ -531,11 +531,11 @@ if (!data.duplicates || data.duplicates.length === 0) {
   dhtml = '<p>No duplicate groups found (or none above the size threshold).</p>';
 } else {
   (data.duplicates || []).forEach(g => {
-    dhtml += `<div class="dup-group">
+    dhtml += ``<div class="dup-group">
       <h3>${g.count} copies · ${g.sizeFormatted} each · <span class="waste">waste ${g.wasteFormatted}</span></h3>
       <div style="font-size:.75rem;color:#94a3b8;margin-bottom:.5rem">SHA-256: ${g.hash}</div>
-      <ul style="margin:0;padding-left:1.2rem">`;
-    (g.paths || []).forEach(p => { dhtml += `<li class="path">${p}</li>`; });
+      <ul style="margin:0;padding-left:1.2rem">``;
+    (g.paths || []).forEach(p => { dhtml += ``<li class="path">${p}</li>``; });
     dhtml += '</ul></div>';
   });
 }
@@ -555,6 +555,7 @@ document.querySelectorAll('.tab').forEach(btn => {
 </html>
 "@
 
+$html = $html.Replace('__B64_PLACEHOLDER__', $b64)
 $html | Set-Content -Path $htmlPath -Encoding UTF8
 
 # ---------- Done ----------
