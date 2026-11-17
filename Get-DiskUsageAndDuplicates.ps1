@@ -356,22 +356,29 @@ if ($dupExport) {
 }
 
 # ---------- Build JSON for HTML ----------
+# Force arrays even when empty so JS never sees null
+function Ensure-Array($v) {
+    if ($null -eq $v) { return @() }
+    if ($v -is [array]) { return $v }
+    return @($v)
+}
+
 $report = [ordered]@{
     generated     = (Get-Date).ToString("o")
-    roots         = $roots
+    roots         = Ensure-Array $roots
     totalSize     = $totalSize
     totalSizeFormatted = Format-Bytes $totalSize
     fileCount     = $allFiles.Count
     duplicateGroups = $duplicateGroups.Count
     totalWaste    = $totalWaste
     totalWasteFormatted = Format-Bytes $totalWaste
-    largestFiles  = $largestFiles | Select-Object -First 50 | ForEach-Object {
+    largestFiles  = Ensure-Array ($largestFiles | Select-Object -First 50 | ForEach-Object {
         [ordered]@{ path=$_.Path; name=$_.Name; size=$_.Size; sizeFormatted=Format-Bytes $_.Size; ext=$_.Extension; lastWrite=$_.LastWrite.ToString("yyyy-MM-dd HH:mm") }
-    }
-    topFolders    = $topFolders | Select-Object -First 30
-    extensions    = $extensionTable
-    ages          = $ageTable
-    duplicates    = $duplicateGroups | Select-Object -First 100 | ForEach-Object {
+    })
+    topFolders    = Ensure-Array ($topFolders | Select-Object -First 30)
+    extensions    = Ensure-Array $extensionTable
+    ages          = Ensure-Array $ageTable
+    duplicates    = Ensure-Array ($duplicateGroups | Select-Object -First 100 | ForEach-Object {
         [ordered]@{
             hash = $_.Hash
             size = $_.Size
@@ -379,10 +386,10 @@ $report = [ordered]@{
             count = $_.Count
             waste = $_.Waste
             wasteFormatted = $_.WasteFormatted
-            paths = $_.Paths
+            paths = Ensure-Array $_.Paths
         }
-    }
-    errors        = $errors | Select-Object -First 50
+    })
+    errors        = Ensure-Array ($errors | Select-Object -First 50)
 }
 
 $jsonPath = "$OutDir\disk-usage-report-$stamp.json"
@@ -451,8 +458,17 @@ $html = @"
 <script id="data" type="application/json">$jsonSafe</script>
 <script>
 const data = JSON.parse(document.getElementById('data').textContent);
-document.getElementById('gen').textContent = new Date(data.generated).toLocaleString();
-document.getElementById('roots').textContent = data.roots.join(', ');
+// Defensive defaults
+data.roots = data.roots || [];
+data.largestFiles = data.largestFiles || [];
+data.topFolders = data.topFolders || [];
+data.extensions = data.extensions || [];
+data.ages = data.ages || [];
+data.duplicates = data.duplicates || [];
+data.errors = data.errors || [];
+
+document.getElementById('gen').textContent = data.generated ? new Date(data.generated).toLocaleString() : '';
+document.getElementById('roots').textContent = (data.roots || []).join(', ');
 
 function fmt(n){ return n.toLocaleString(); }
 function pct(part, total){ return total ? Math.round(part/total*100) : 0; }
@@ -472,7 +488,7 @@ document.getElementById('overview').innerHTML = `
 
 // Folders
 let fhtml = '<table><thead><tr><th>Folder</th><th>Size</th></tr></thead><tbody>';
-data.topFolders.forEach(f => {
+(data.topFolders || []).forEach(f => {
   fhtml += `<tr><td class="path">${f.Path}</td><td>${f.SizeFormatted}</td></tr>`;
 });
 fhtml += '</tbody></table>';
@@ -480,7 +496,7 @@ document.getElementById('folders').innerHTML = fhtml;
 
 // Files
 let flhtml = '<table><thead><tr><th>File</th><th>Size</th><th>Modified</th></tr></thead><tbody>';
-data.largestFiles.forEach(f => {
+(data.largestFiles || []).forEach(f => {
   flhtml += `<tr><td class="path">${f.path}</td><td>${f.sizeFormatted}</td><td>${f.lastWrite}</td></tr>`;
 });
 flhtml += '</tbody></table>';
@@ -488,8 +504,8 @@ document.getElementById('files').innerHTML = flhtml;
 
 // Types
 let thtml = '<table><thead><tr><th>Extension</th><th>Size</th><th>Count</th><th></th></tr></thead><tbody>';
-const maxExt = Math.max(...data.extensions.map(e => e.Size), 1);
-data.extensions.forEach(e => {
+const maxExt = Math.max(...(data.extensions || []).map(e => e.Size), 1);
+(data.extensions || []).forEach(e => {
   const p = pct(e.Size, maxExt);
   thtml += `<tr><td>${e.Extension}</td><td>${e.SizeFormatted}</td><td>${fmt(e.Count)}</td>
     <td><div class="bar"><div style="width:${p}%"></div></div></td></tr>`;
@@ -499,8 +515,8 @@ document.getElementById('types').innerHTML = thtml;
 
 // Ages
 let ahtml = '<table><thead><tr><th>Age</th><th>Size</th><th>Files</th><th></th></tr></thead><tbody>';
-const maxAge = Math.max(...data.ages.map(a => a.Size), 1);
-data.ages.forEach(a => {
+const maxAge = Math.max(...(data.ages || []).map(a => a.Size), 1);
+(data.ages || []).forEach(a => {
   const p = pct(a.Size, maxAge);
   ahtml += `<tr><td>${a.AgeBucket}</td><td>${a.SizeFormatted}</td><td>${fmt(a.Count)}</td>
     <td><div class="bar"><div style="width:${p}%"></div></div></td></tr>`;
@@ -513,12 +529,12 @@ let dhtml = '';
 if (!data.duplicates || data.duplicates.length === 0) {
   dhtml = '<p>No duplicate groups found (or none above the size threshold).</p>';
 } else {
-  data.duplicates.forEach(g => {
+  (data.duplicates || []).forEach(g => {
     dhtml += `<div class="dup-group">
       <h3>${g.count} copies · ${g.sizeFormatted} each · <span class="waste">waste ${g.wasteFormatted}</span></h3>
       <div style="font-size:.75rem;color:#94a3b8;margin-bottom:.5rem">SHA-256: ${g.hash}</div>
       <ul style="margin:0;padding-left:1.2rem">`;
-    g.paths.forEach(p => { dhtml += `<li class="path">${p}</li>`; });
+    (g.paths || []).forEach(p => { dhtml += `<li class="path">${p}</li>`; });
     dhtml += '</ul></div>';
   });
 }
