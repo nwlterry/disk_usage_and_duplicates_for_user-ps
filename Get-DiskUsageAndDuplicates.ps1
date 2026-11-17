@@ -71,6 +71,11 @@ function Get-AgeBucket {
     return "Older than 1 year"
 }
 
+function Normalize-Path([string]$p) {
+    if ([string]::IsNullOrEmpty($p)) { return $p }
+    return $p.Replace('\','/')
+}
+
 # ---------- Resolve scan roots ----------
 $roots = @()
 
@@ -363,11 +368,6 @@ function Ensure-Array($v) {
     return @($v)
 }
 
-function Normalize-Path([string]$p) {
-    if ([string]::IsNullOrEmpty($p)) { return $p }
-    return $p.Replace('\','/')
-}
-
 $report = [ordered]@{
     generated     = (Get-Date).ToString("o")
     roots         = Ensure-Array ($roots | ForEach-Object { Normalize-Path $_ })
@@ -514,22 +514,26 @@ document.getElementById('files').innerHTML = flhtml;
 
 // Types
 let thtml = '<table><thead><tr><th>Extension</th><th>Size</th><th>Count</th><th></th></tr></thead><tbody>';
-const maxExt = Math.max(...(data.extensions || []).map(e => e.Size), 1);
+const maxExt = Math.max(...(data.extensions || []).map(e => e.Size || e.size || 0), 1);
 (data.extensions || []).forEach(e => {
-  const p = pct(e.Size, maxExt);
-  thtml += ``<tr><td>${e.Extension}</td><td>${e.SizeFormatted}</td><td>${fmt(e.Count)}</td>
-    <td><div class="bar"><div style="width:${p}%"></div></div></td></tr>``;
+  var p = pct(e.Size || e.size || 0, maxExt);
+  var ext = e.Extension || e.extension || '';
+  var sz = e.SizeFormatted || e.sizeFormatted || '';
+  var cnt = fmt(e.Count || e.count || 0);
+  thtml += '<tr><td>' + ext + '</td><td>' + sz + '</td><td>' + cnt + '</td><td><div class="bar"><div style="width:' + p + '%"></div></div></td></tr>';
 });
 thtml += '</tbody></table>';
 document.getElementById('types').innerHTML = thtml;
 
 // Ages
 let ahtml = '<table><thead><tr><th>Age</th><th>Size</th><th>Files</th><th></th></tr></thead><tbody>';
-const maxAge = Math.max(...(data.ages || []).map(a => a.Size), 1);
+const maxAge = Math.max(...(data.ages || []).map(a => a.Size || a.size || 0), 1);
 (data.ages || []).forEach(a => {
-  const p = pct(a.Size, maxAge);
-  ahtml += ``<tr><td>${a.AgeBucket}</td><td>${a.SizeFormatted}</td><td>${fmt(a.Count)}</td>
-    <td><div class="bar"><div style="width:${p}%"></div></div></td></tr>``;
+  var p = pct(a.Size || a.size || 0, maxAge);
+  var bucket = a.AgeBucket || a.ageBucket || '';
+  var sz = a.SizeFormatted || a.sizeFormatted || '';
+  var cnt = fmt(a.Count || a.count || 0);
+  ahtml += '<tr><td>' + bucket + '</td><td>' + sz + '</td><td>' + cnt + '</td><td><div class="bar"><div style="width:' + p + '%"></div></div></td></tr>';
 });
 ahtml += '</tbody></table>';
 document.getElementById('ages').innerHTML = ahtml;
@@ -544,7 +548,7 @@ if (!data.duplicates || data.duplicates.length === 0) {
       <h3>${g.count} copies · ${g.sizeFormatted} each · <span class="waste">waste ${g.wasteFormatted}</span></h3>
       <div style="font-size:.75rem;color:#94a3b8;margin-bottom:.5rem">SHA-256: ${g.hash}</div>
       <ul style="margin:0;padding-left:1.2rem">``;
-    (g.paths || []).forEach(p => { dhtml += ``<li class="path">${p}</li>``; });
+    (g.paths || []).forEach(p => { dhtml += '<li class="path">' + p + '</li>'; });
     dhtml += '</ul></div>';
   });
 }
