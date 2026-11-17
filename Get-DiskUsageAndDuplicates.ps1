@@ -9,7 +9,8 @@
     Designed for normal (non-admin) users. No external tools required.
 
 .PARAMETER Path
-    Folder or drive to scan. Defaults to the current user's profile folders
+    Folder or drive to scan. Accepts a single path, multiple paths, or comma/semicolon-separated string.
+    Defaults to the current user's profile folders
     (Documents, Downloads, Desktop, Pictures, Videos, Music) if not specified.
 
 .PARAMETER OutDir
@@ -27,7 +28,7 @@
     # Interactive / defaults to user profile folders
 
 .EXAMPLE
-    .\Get-DiskUsageAndDuplicates.ps1 -Path "D:\Photos" -OutDir "C:\Reports" -MinHashMB 1
+    .\Get-DiskUsageAndDuplicates.ps1 -Path "D:\Photos","E:\Videos" -OutDir "C:\Reports" -MinHashMB 1
 
 .NOTES
     Inspired by https://github.com/nwlterry/disk_space_analysis-windows-ps
@@ -36,7 +37,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$Path = "",
+    [string[]]$Path = @(),
     [string]$OutDir = ".\DiskUsageReport",
     [int]$MinHashMB = 5,
     [int]$MaxFilesToHash = 50000
@@ -70,7 +71,7 @@ function Get-AgeBucket {
 
 # ---------- Resolve scan roots ----------
 $roots = @()
-if ([string]::IsNullOrWhiteSpace($Path)) {
+if (-not $Path -or $Path.Count -eq 0 -or ($Path.Count -eq 1 -and [string]::IsNullOrWhiteSpace($Path[0]))) {
     Write-Status "No path specified. Scanning common user folders..." "Yellow"
     $userProfile = $env:USERPROFILE
     $candidates = @(
@@ -89,7 +90,12 @@ if ([string]::IsNullOrWhiteSpace($Path)) {
         exit 1
     }
 } else {
-    $raw = $Path -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+    # Support both array and comma/semicolon-separated strings
+    $raw = @()
+    foreach ($p in $Path) {
+        if ([string]::IsNullOrWhiteSpace($p)) { continue }
+        $raw += $p -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+    }
     foreach ($r in $raw) {
         if (Test-Path -LiteralPath $r) {
             $roots += (Resolve-Path -LiteralPath $r).Path
