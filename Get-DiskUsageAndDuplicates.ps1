@@ -446,6 +446,8 @@ $html = @'
   .dup-group h3 { margin:0 0 .5rem 0; font-size:1rem; }
   .tree-item:hover { background: #1e293b55; border-radius: 4px; }
   .tree-toggle:hover { color: var(--accent); }
+  .viewbtn { background:none; border:1px solid var(--border); color:var(--muted); padding:.4rem .85rem; cursor:pointer; font-size:.9rem; border-radius:6px; margin-right:.4rem; }
+  .viewbtn.active { color:var(--accent); border-color:var(--accent); }
 </style>
 </head>
 <body>
@@ -526,7 +528,7 @@ function buildTree(folders, roots) {
       cur = next;
     });
   });
-  // Count children recursively
+  // Count direct children (subfolders)
   function countKids(n) {
     var c = Object.keys(n.children || {}).length;
     Object.values(n.children || {}).forEach(function(ch) { c += countKids(ch); });
@@ -549,43 +551,42 @@ function buildTree(folders, roots) {
 function renderTreeNode(n, depth) {
   var kids = Object.values(n.children || {});
   var hasKids = kids.length > 0;
-  var indent = (depth * 18) + 'px';
+  var indent = (depth * 20) + 'px';
   var id = 't' + Math.random().toString(36).slice(2, 8);
-  var html = '<div class="tree-item" style="padding-left:' + indent + '; padding-top:2px; padding-bottom:2px;">';
+  var html = '<div class="tree-item" style="padding-left:' + indent + '; line-height:1.6; display:flex; align-items:center;">';
   if (hasKids) {
-    html += '<span class="tree-toggle" data-target="' + id + '" style="cursor:pointer;user-select:none;margin-right:4px;font-size:0.8em">▾</span>';
+    html += '<span class="tree-toggle" data-target="' + id + '" style="cursor:pointer;user-select:none;margin-right:6px;font-size:0.9rem;width:14px;text-align:center;">▾</span>';
   } else {
-    html += '<span style="display:inline-block;width:16px"></span>';
+    html += '<span style="display:inline-block;width:20px;"></span>';
   }
-  html += '<span style="margin-right:4px">📁</span>';
-  html += '<span>' + n.name + '</span>';
-  if (n.size) html += ' <span style="color:#94a3b8;font-size:.8rem">(' + n.size + ')</span>';
-  if (n.fileCount) html += ' <span style="color:#64748b;font-size:.75rem">[' + n.fileCount + ' files]</span>';
-  if (hasKids) html += ' <span style="color:#64748b;font-size:.75rem">[' + n.count + ' sub]</span>';
+  html += '<span style="margin-right:6px;font-size:1.05rem;">📁</span>';
+  html += '<span style="font-weight:500;">' + n.name + '</span>';
+  if (n.size) html += ' <span style="color:#94a3b8;font-size:.8rem;margin-left:6px;">(' + n.size + ')</span>';
+  if (n.fileCount) html += ' <span style="color:#64748b;font-size:.75rem;margin-left:4px;">· ' + n.fileCount + ' files</span>';
+  if (hasKids) html += ' <span style="color:#64748b;font-size:.75rem;margin-left:4px;">[' + n.count + ' sub]</span>';
   html += '</div>';
   if (hasKids) {
-    html += '<div id="' + id + '" class="tree-children" style="display:block">';
-    kids.sort(function(a,b){ return (b.size||'').localeCompare(a.size||''); });
+    html += '<div id="' + id + '" class="tree-children" style="display:block;">';
+    kids.sort(function(a,b){ return (b.size||'').localeCompare(a.size||'') || a.name.localeCompare(b.name); });
     kids.forEach(function(ch) { html += renderTreeNode(ch, depth + 1); });
     html += '</div>';
   }
   return html;
 }
 function renderList(folders) {
-  var html = '<table><thead><tr><th>Folder</th><th>Size</th><th>Files</th></tr></thead><tbody>';
+  var html = '<table><thead><tr><th>Folder</th><th>Size</th></tr></thead><tbody>';
   asArray(folders).forEach(function(f) {
     var p = f.Path || f.path || '';
     var s = f.SizeFormatted || f.sizeFormatted || '';
-    var c = f.FileCount || f.fileCount || '';
-    html += '<tr><td class="path">' + p + '</td><td>' + s + '</td><td>' + c + '</td></tr>';
+    html += '<tr><td class="path">' + p + '</td><td>' + s + '</td></tr>';
   });
   html += '</tbody></table>';
   return html;
 }
 var treeRoots = buildTree(asArray(data.topFolders), asArray(data.roots));
 var foldersHtml = '<div style="margin-bottom:.75rem">' +
-  '<button id="btnList" class="tab" style="border:1px solid #334155;border-radius:6px;margin-right:.4rem">List</button>' +
-  '<button id="btnTree" class="tab active" style="border:1px solid #334155;border-radius:6px">Tree</button>' +
+  '<button id="btnList" class="viewbtn">List</button>' +
+  '<button id="btnTree" class="viewbtn active">Tree</button>' +
   '</div>' +
   '<div id="folderContent"></div>';
 document.getElementById('folders').innerHTML = foldersHtml;
@@ -621,8 +622,8 @@ let flhtml = '<table><thead><tr><th>File</th><th>Size</th><th>Modified</th></tr>
 asArray(data.largestFiles).forEach(f => {
   var p = f.path || f.Path || '';
   var s = f.sizeFormatted || f.SizeFormatted || '';
-  var lw = f.lastWrite || f.LastWrite || '';
-  flhtml += '<tr><td class="path">' + p + '</td><td>' + s + '</td><td>' + lw + '</td></tr>';
+  var d = f.lastWrite || f.LastWrite || '';
+  flhtml += '<tr><td class="path">' + p + '</td><td>' + s + '</td><td>' + d + '</td></tr>';
 });
 flhtml += '</tbody></table>';
 document.getElementById('files').innerHTML = flhtml;
@@ -669,13 +670,17 @@ if (!data.duplicates || data.duplicates.length === 0) {
 }
 document.getElementById('dupes').innerHTML = dhtml;
 
-// Tabs
-document.querySelectorAll('.tab').forEach(btn => {
+// Tabs — only main nav buttons (they have data-pane). List/Tree use .viewbtn.
+document.querySelectorAll('.tabs > .tab').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    var paneId = btn.getAttribute('data-pane');
+    if (!paneId) return;
+    var pane = document.getElementById(paneId);
+    if (!pane) return;
+    document.querySelectorAll('.tabs > .tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
-    document.getElementById(btn.dataset.pane).classList.add('active');
+    pane.classList.add('active');
   });
 });
 </script>
