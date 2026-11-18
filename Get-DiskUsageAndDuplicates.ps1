@@ -367,10 +367,12 @@ if ($dupExport) {
 # ---------- Build JSON for HTML ----------
 # Force arrays even when empty so JS never sees null
 function Ensure-Array($v) {
-    if ($null -eq $v) { return @() }
-    # Always force a true array so ConvertTo-Json does not collapse single-item results
-    $arr = @($v)
-    return ,$arr   # unary comma prevents unrolling in some pipelines
+    # Emit items one by one. Do NOT use the unary comma — on Windows PowerShell 5.1
+    # `return ,$array` becomes a {value,Count} object in ConvertTo-Json and the HTML loses the data.
+    if ($null -eq $v) { return }
+    foreach ($item in @($v)) {
+        if ($null -ne $item) { $item }
+    }
 }
 
 $report = [ordered]@{
@@ -484,9 +486,17 @@ data.errors = data.errors || [];
 
 // Robust array coercion (handles PowerShell ConvertTo-Json single-item unwrapping)
 function asArray(v) {
-  if (Array.isArray(v)) return v;
   if (v == null) return [];
-  return [v];
+  if (Array.isArray(v)) {
+    if (v.length === 1 && Array.isArray(v[0])) return asArray(v[0]);
+    return v;
+  }
+  if (typeof v === 'object') {
+    if (Array.isArray(v.value)) return asArray(v.value);
+    if (Array.isArray(v.Value)) return asArray(v.Value);
+    return [v];
+  }
+  return [];
 }
 
 document.getElementById('gen').textContent = data.generated ? new Date(data.generated).toLocaleString() : '';
@@ -655,16 +665,22 @@ ahtml += '</tbody></table>';
 document.getElementById('ages').innerHTML = ahtml;
 
 // Duplicates
-let dhtml = '';
-if (!data.duplicates || data.duplicates.length === 0) {
+var dupes = asArray(data.duplicates).filter(function(g){ return g && (g.hash || g.Hash || g.paths || g.Paths); });
+var dhtml = '';
+if (dupes.length === 0) {
   dhtml = '<p>No duplicate groups found (or none above the size threshold).</p>';
 } else {
-  asArray(data.duplicates).forEach(g => {
+  dupes.forEach(function(g) {
+    var count = g.count != null ? g.count : (g.Count != null ? g.Count : 0);
+    var sizeFormatted = g.sizeFormatted || g.SizeFormatted || '';
+    var wasteFormatted = g.wasteFormatted || g.WasteFormatted || '';
+    var hash = g.hash || g.Hash || '';
+    var paths = asArray(g.paths != null ? g.paths : g.Paths);
     dhtml += '<div class="dup-group">' +
-      '<h3>' + (g.count||0) + ' copies · ' + (g.sizeFormatted||'') + ' each · <span class="waste">waste ' + (g.wasteFormatted||'') + '</span></h3>' +
-      '<div style="font-size:.8rem;color:#38bdf8;margin-bottom:.5rem;font-family:Consolas,monospace;background:#0f172a;padding:4px 8px;border-radius:4px;display:inline-block;">SHA-256: ' + (g.hash||'') + '</div>' +
+      '<h3>' + count + ' copies · ' + sizeFormatted + ' each · <span class="waste">waste ' + wasteFormatted + '</span></h3>' +
+      '<div style="font-size:.8rem;color:#38bdf8;margin-bottom:.5rem;font-family:Consolas,monospace;background:#0f172a;padding:4px 8px;border-radius:4px;display:inline-block;">SHA-256: ' + hash + '</div>' +
       '<ul style="margin:0;padding-left:1.2rem">';
-    asArray(g.paths).forEach(p => { dhtml += '<li class="path">' + p + '</li>'; });
+    paths.forEach(function(p) { dhtml += '<li class="path">' + p + '</li>'; });
     dhtml += '</ul></div>';
   });
 }
