@@ -289,7 +289,7 @@ foreach ($root in $roots) {
             foreach ($filePath in [System.IO.Directory]::EnumerateFiles($current)) {
                 $fileCount++
                 if ($fileCount % 2000 -eq 0) {
-                    Write-Host "`r  Files found: $fileCount" -NoNewline -ForegroundColor DarkGray
+                    Write-Host "  Files found: $fileCount" -ForegroundColor DarkGray
                 }
                 if (Test-ExcludedFile $filePath) { continue }
 
