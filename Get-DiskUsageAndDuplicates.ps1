@@ -76,6 +76,72 @@ function Normalize-Path([string]$p) {
     return $p.Replace('\','/')
 }
 
+# Folders a normal directory listing cannot read, even as a local Administrator
+# or as NT AUTHORITY\SYSTEM, unless ownership is taken first.
+# Paths are relative to the volume root, so C:\ and D:\ (and any other drive) match.
+# Children of these folders are skipped too.
+$script:ExcludedDirectories = @(
+    'System Volume Information',                 # Administrators: access denied. Owner is SYSTEM.
+    'Windows\CSC',                               # Offline Files. Administrators: access denied.
+    'Windows\System32\LogFiles\WMI\RtBackup',    # Administrators: access denied.
+    'Windows\ServiceProfiles\LocalService',      # Administrators: access denied.
+    'Windows\ServiceProfiles\NetworkService',    # Administrators: access denied.
+    'Program Files\WindowsApps',                 # Explicit deny for Administrators. Owner is TrustedInstaller.
+    'Program Files\ModifiableWindowsApps',       # Same packaged-app deny as WindowsApps, when present.
+    'Recovery\WindowsRE'                         # WinRE image. Administrators: access denied on a stock ACL.
+)
+
+# Files the kernel keeps open with an exclusive lock. CreateFile fails for every
+# account, including LOCAL SYSTEM, while Windows is running.
+$script:ExcludedRootFiles = @(
+    'pagefile.sys',
+    'hiberfil.sys',
+    'swapfile.sys'
+)
+$script:ExcludedHiveFiles = @(
+    'SAM', 'SECURITY', 'SYSTEM', 'SOFTWARE', 'DEFAULT', 'COMPONENTS', 'DRIVERS', 'ELAM', 'BBI',
+    'SAM.LOG', 'SAM.LOG1', 'SAM.LOG2',
+    'SECURITY.LOG', 'SECURITY.LOG1', 'SECURITY.LOG2',
+    'SYSTEM.LOG', 'SYSTEM.LOG1', 'SYSTEM.LOG2',
+    'SOFTWARE.LOG', 'SOFTWARE.LOG1', 'SOFTWARE.LOG2',
+    'DEFAULT.LOG', 'DEFAULT.LOG1', 'DEFAULT.LOG2',
+    'COMPONENTS.LOG', 'COMPONENTS.LOG1', 'COMPONENTS.LOG2'
+)
+
+function Get-VolumeRelativePath([string]$FullPath) {
+    if ([string]::IsNullOrEmpty($FullPath)) { return '' }
+    $full = [System.IO.Path]::GetFullPath($FullPath).TrimEnd('\')
+    $vol = [System.IO.Path]::GetPathRoot($full)
+    if ([string]::IsNullOrEmpty($vol) -or $full.Length -le $vol.Length) { return '' }
+    return $full.Substring($vol.Length)
+}
+
+function Test-ExcludedDirectory([string]$FullPath) {
+    $rel = Get-VolumeRelativePath $FullPath
+    if ([string]::IsNullOrEmpty($rel)) { return $false }
+    foreach ($ex in $script:ExcludedDirectories) {
+        if ($rel.Equals($ex, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+        if ($rel.StartsWith($ex + '\', [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
+}
+
+function Test-ExcludedFile([string]$FilePath) {
+    $name = [System.IO.Path]::GetFileName($FilePath)
+    $relDir = Get-VolumeRelativePath ([System.IO.Path]::GetDirectoryName($FilePath))
+    if ([string]::IsNullOrEmpty($relDir)) {
+        foreach ($n in $script:ExcludedRootFiles) {
+            if ($name.Equals($n, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+        }
+    }
+    if ($relDir.Equals('Windows\System32\config', [System.StringComparison]::OrdinalIgnoreCase)) {
+        foreach ($n in $script:ExcludedHiveFiles) {
+            if ($name.Equals($n, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+        }
+    }
+    return $false
+}
+
 # ---------- Resolve scan roots ----------
 $roots = @()
 
@@ -166,85 +232,127 @@ $minHashBytes = [long]$MinHashMB * 1MB
 $sizeGroups = @{}           # size -> list of paths (for duplicate candidates)
 
 Write-Status "Starting recursive scan..." "Cyan"
+Write-Status "Skipping folders that Administrators and LOCAL SYSTEM cannot read (System Volume Information, WindowsApps, CSC, WinRE, and the locked registry hives)." "DarkGray"
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $fileCount = 0
 $dirCount = 0
+$skippedExcluded = 0
+$skippedJunction = 0
 
 foreach ($root in $roots) {
     Write-Status "Scanning: $root" "Yellow"
-    try {
-        $enum = [System.IO.Directory]::EnumerateFiles($root, "*", [System.IO.SearchOption]::AllDirectories)
-        foreach ($filePath in $enum) {
-            $fileCount++
-            if ($fileCount % 2000 -eq 0) {
-                Write-Host "`r  Files found: $fileCount" -NoNewline -ForegroundColor DarkGray
+    if (Test-ExcludedDirectory $root) {
+        $skippedExcluded++
+        $errors.Add([PSCustomObject]@{ Path = $root; Error = "Skipped by exclusion (not readable by local Administrators or LOCAL SYSTEM)" })
+        Write-Status "Skipping excluded root: $root" "Yellow"
+        continue
+    }
+
+    # Directory-by-directory. EnumerateFiles(AllDirectories) stops the whole drive
+    # at the first access-denied folder, so a C:\ or D:\ scan would die on
+    # System Volume Information and never finish.
+    $queue = [System.Collections.Generic.Queue[string]]::new()
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $queue.Enqueue($root)
+
+    while ($queue.Count -gt 0) {
+        $current = $queue.Dequeue()
+        if (-not $seen.Add($current)) { continue }
+        $dirCount++
+
+        try {
+            foreach ($sub in [System.IO.Directory]::EnumerateDirectories($current)) {
+                $isLink = $false
+                try {
+                    $attr = [System.IO.File]::GetAttributes($sub)
+                    if (($attr -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { $isLink = $true }
+                } catch {
+                    $errors.Add([PSCustomObject]@{ Path = $sub; Error = $_.Exception.Message })
+                    continue
+                }
+                if ($isLink) {
+                    $skippedJunction++
+                    continue
+                }
+                if (Test-ExcludedDirectory $sub) {
+                    $skippedExcluded++
+                    $errors.Add([PSCustomObject]@{ Path = $sub; Error = "Skipped by exclusion (not readable by local Administrators or LOCAL SYSTEM)" })
+                    continue
+                }
+                $queue.Enqueue($sub)
             }
-
-            try {
-                $fi = [System.IO.FileInfo]::new($filePath)
-                # Skip reparse points / junctions
-                if ($fi.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { continue }
-
-                $size = $fi.Length
-                $ext = if ([string]::IsNullOrEmpty($fi.Extension)) { "(no extension)" } else { $fi.Extension.ToLower() }
-                $age = Get-AgeBucket $fi.LastWriteTime
-
-                $allFiles.Add([PSCustomObject]@{
-                    Path        = $filePath
-                    Name        = $fi.Name
-                    Size        = $size
-                    Extension   = $ext
-                    LastWrite   = $fi.LastWriteTime
-                    AgeBucket   = $age
-                    Directory   = $fi.DirectoryName
-                })
-
-                # Extension stats
-                if (-not $extensionStats.ContainsKey($ext)) {
-                    $extensionStats[$ext] = @{ Size = 0L; Count = 0 }
-                }
-                $extensionStats[$ext].Size += $size
-                $extensionStats[$ext].Count++
-
-                # Age stats
-                if (-not $ageStats.ContainsKey($age)) {
-                    $ageStats[$age] = @{ Size = 0L; Count = 0 }
-                }
-                $ageStats[$age].Size += $size
-                $ageStats[$age].Count++
-
-                # Folder size + file count accumulation (walk up)
-                $dir = $fi.DirectoryName
-                while ($dir -and $dir.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
-                    if (-not $folderSizes.ContainsKey($dir)) { $folderSizes[$dir] = 0L }
-                    $folderSizes[$dir] += $size
-                    if (-not $folderFileCounts.ContainsKey($dir)) { $folderFileCounts[$dir] = 0 }
-                    $folderFileCounts[$dir]++
-                    $parent = [System.IO.Path]::GetDirectoryName($dir)
-                    if ($parent -eq $dir) { break }
-                    $dir = $parent
-                }
-
-                # Candidate for duplicates
-                if ($size -ge $minHashBytes) {
-                    if (-not $sizeGroups.ContainsKey($size)) {
-                        $sizeGroups[$size] = New-Object System.Collections.Generic.List[string]
-                    }
-                    $sizeGroups[$size].Add($filePath)
-                }
-            } catch {
-                $errors.Add([PSCustomObject]@{ Path = $filePath; Error = $_.Exception.Message })
-            }
+        } catch {
+            $errors.Add([PSCustomObject]@{ Path = $current; Error = $_.Exception.Message })
         }
-    } catch {
-        $errors.Add([PSCustomObject]@{ Path = $root; Error = $_.Exception.Message })
-        Write-Status "Access issue on $root : $($_.Exception.Message)" "Yellow"
+
+        try {
+            foreach ($filePath in [System.IO.Directory]::EnumerateFiles($current)) {
+                $fileCount++
+                if ($fileCount % 2000 -eq 0) {
+                    Write-Host "`r  Files found: $fileCount" -NoNewline -ForegroundColor DarkGray
+                }
+                if (Test-ExcludedFile $filePath) { continue }
+
+                try {
+                    $fi = [System.IO.FileInfo]::new($filePath)
+                    if ($fi.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { continue }
+
+                    $size = $fi.Length
+                    $ext = if ([string]::IsNullOrEmpty($fi.Extension)) { "(no extension)" } else { $fi.Extension.ToLower() }
+                    $age = Get-AgeBucket $fi.LastWriteTime
+
+                    $allFiles.Add([PSCustomObject]@{
+                        Path        = $filePath
+                        Name        = $fi.Name
+                        Size        = $size
+                        Extension   = $ext
+                        LastWrite   = $fi.LastWriteTime
+                        AgeBucket   = $age
+                        Directory   = $fi.DirectoryName
+                    })
+
+                    if (-not $extensionStats.ContainsKey($ext)) {
+                        $extensionStats[$ext] = @{ Size = 0L; Count = 0 }
+                    }
+                    $extensionStats[$ext].Size += $size
+                    $extensionStats[$ext].Count++
+
+                    if (-not $ageStats.ContainsKey($age)) {
+                        $ageStats[$age] = @{ Size = 0L; Count = 0 }
+                    }
+                    $ageStats[$age].Size += $size
+                    $ageStats[$age].Count++
+
+                    $dir = $fi.DirectoryName
+                    while ($dir -and $dir.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        if (-not $folderSizes.ContainsKey($dir)) { $folderSizes[$dir] = 0L }
+                        $folderSizes[$dir] += $size
+                        if (-not $folderFileCounts.ContainsKey($dir)) { $folderFileCounts[$dir] = 0 }
+                        $folderFileCounts[$dir]++
+                        $parent = [System.IO.Path]::GetDirectoryName($dir)
+                        if ($parent -eq $dir) { break }
+                        $dir = $parent
+                    }
+
+                    if ($size -ge $minHashBytes) {
+                        if (-not $sizeGroups.ContainsKey($size)) {
+                            $sizeGroups[$size] = New-Object System.Collections.Generic.List[string]
+                        }
+                        $sizeGroups[$size].Add($filePath)
+                    }
+                } catch {
+                    $errors.Add([PSCustomObject]@{ Path = $filePath; Error = $_.Exception.Message })
+                }
+            }
+        } catch {
+            $errors.Add([PSCustomObject]@{ Path = $current; Error = $_.Exception.Message })
+        }
     }
 }
 
 Write-Host ""
 $sw.Stop()
-Write-Status "Scan finished. Files: $fileCount   Time: $($sw.Elapsed.ToString('hh\:mm\:ss'))" "Green"
+Write-Status "Scan finished. Files: $fileCount   Folders: $dirCount   Skipped excluded: $skippedExcluded   Skipped junctions: $skippedJunction   Time: $($sw.Elapsed.ToString('hh\:mm\:ss'))" "Green"
 
 # ---------- Largest files & folders ----------
 $largestFiles = $allFiles | Sort-Object Size -Descending | Select-Object -First 100
