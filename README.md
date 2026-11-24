@@ -9,6 +9,7 @@ Inspired by [nwlterry/disk_space_analysis-windows-ps](https://github.com/nwlterr
 ## Features
 
 - Scan any folder, drive, or multiple paths
+- Skips folders and locked files that local Administrators or LOCAL SYSTEM cannot read (`System Volume Information`, `WindowsApps`, `Windows\CSC`, WinRE, live registry hives, `pagefile.sys`). One denied folder no longer stops a `C:\` or `D:\` scan.
 - Defaults to common user folders (Documents, Downloads, Desktop, Pictures, Videos, Music) if no path is given
 - Largest folders & files
 - Breakdown by file type (extension) and by age
